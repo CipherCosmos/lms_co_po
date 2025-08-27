@@ -350,9 +350,10 @@ class LMSBackendTester:
             return False
         
         # Test creating a department
+        timestamp = int(time.time())
         dept_data = {
             "name": "Computer Science and Engineering",
-            "code": "CSE"
+            "code": f"CSE{timestamp}"
         }
         
         response = self.make_request('POST', '/departments', dept_data, auth_required=True)
