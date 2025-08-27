@@ -270,11 +270,12 @@ class LMSBackendTester:
             self.log_test("Unauthorized Access Test", False, "Request failed")
             return False
         
-        if response.status_code == 401:
-            self.log_test("Unauthorized Access Test", True, "Correctly rejected unauthorized request")
+        # FastAPI returns 403 when no Authorization header is provided
+        if response.status_code in [401, 403]:
+            self.log_test("Unauthorized Access Test", True, f"Correctly rejected unauthorized request (HTTP {response.status_code})")
             return True
         else:
-            self.log_test("Unauthorized Access Test", False, f"Expected 401, got {response.status_code}")
+            self.log_test("Unauthorized Access Test", False, f"Expected 401/403, got {response.status_code}")
             return False
 
     def test_list_users(self):
