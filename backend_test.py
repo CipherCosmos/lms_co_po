@@ -301,9 +301,11 @@ class LMSBackendTester:
 
     def test_create_user(self):
         """Test creating a new user"""
+        # Use timestamp to ensure unique email
+        timestamp = int(time.time())
         user_data = {
             "name": "Dr. John Smith",
-            "email": "john.smith@mit.edu",
+            "email": f"john.smith.{timestamp}@mit.edu",
             "role": "TEACHER",
             "password": "Teacher123!@#",
             "phone": "+1234567890"
