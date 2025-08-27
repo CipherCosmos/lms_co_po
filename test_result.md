@@ -116,6 +116,9 @@ backend:
       - working: true
         agent: "main"
         comment: "JWT authentication with bcrypt password hashing implemented and working"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Login, token refresh, and authentication working correctly. Admin login (admin@mit.edu/Admin123!@#) successful. JWT tokens properly generated and validated. Minor: Invalid token handling returns 500 instead of 401, but core functionality works."
 
   - task: "First-run Setup Wizard"
     implemented: true
@@ -128,6 +131,9 @@ backend:
       - working: true
         agent: "main"
         comment: "Setup wizard successfully creates admin user and initializes system"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Setup status check and system initialization working perfectly. Admin user creation successful with proper token generation."
 
   - task: "User Management APIs"
     implemented: true
@@ -140,6 +146,9 @@ backend:
       - working: true
         agent: "main"
         comment: "Basic user CRUD operations implemented with role-based access"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: User management APIs working correctly. /users/me returns current user info, /users GET lists all users (admin only), /users POST creates new users with proper validation. Role-based access control functioning."
 
   - task: "Department and Program Management"
     implemented: true
@@ -152,6 +161,9 @@ backend:
       - working: true
         agent: "main"
         comment: "Department and program APIs implemented with proper validation"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Department and program management APIs working correctly. GET /departments and /programs list existing records, POST endpoints create new departments/programs with proper validation and duplicate checking."
 
   - task: "Course and Subject Management"
     implemented: false
