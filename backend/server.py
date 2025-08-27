@@ -360,6 +360,13 @@ class SetupRequest(BaseModel):
 # API Routes
 
 # Setup and Authentication Routes
+@api_router.post("/setup/reset")
+async def reset_setup():
+    """Reset setup status (for development)"""
+    await db.setup.delete_many({})
+    await db.users.delete_many({})
+    return {"message": "Setup reset successfully"}
+
 @api_router.get("/setup/status")
 async def get_setup_status():
     """Check if the system has been set up"""
