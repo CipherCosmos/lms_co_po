@@ -531,6 +531,469 @@ async def create_program(prog_data: Program, current_user: Dict = Depends(get_ad
     await db.programs.insert_one(prog_data.dict())
     return prog_data
 
+# Course Management Routes
+@api_router.get("/courses", response_model=List[Course])
+async def list_courses(program_id: Optional[str] = None, current_user: Dict = Depends(get_current_user)):
+    """List courses, optionally filtered by program"""
+    query = {"program_id": program_id} if program_id else {}
+    courses = await db.courses.find(query).to_list(1000)
+    return [Course(**course) for course in courses]
+
+@api_router.post("/courses", response_model=Course)
+async def create_course(course_data: Course, current_user: Dict = Depends(get_admin_user)):
+    """Create a new course (admin only)"""
+    # Check for duplicate code within the same program
+    existing_course = await db.courses.find_one({
+        "program_id": course_data.program_id,
+        "code": course_data.code
+    })
+    if existing_course:
+        raise HTTPException(status_code=400, detail="Course code already exists in this program")
+    
+    # Verify program exists
+    program = await db.programs.find_one({"id": course_data.program_id})
+    if not program:
+        raise HTTPException(status_code=400, detail="Program not found")
+    
+    await db.courses.insert_one(course_data.dict())
+    return course_data
+
+@api_router.get("/courses/{course_id}", response_model=Course)
+async def get_course(course_id: str, current_user: Dict = Depends(get_current_user)):
+    """Get course by ID"""
+    course = await db.courses.find_one({"id": course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    return Course(**course)
+
+# Subject Management Routes
+@api_router.get("/subjects", response_model=List[Subject])
+async def list_subjects(course_id: Optional[str] = None, teacher_id: Optional[str] = None, current_user: Dict = Depends(get_current_user)):
+    """List subjects, optionally filtered by course or teacher"""
+    query = {}
+    if course_id:
+        query["course_id"] = course_id
+    if teacher_id:
+        query["teacher_id"] = teacher_id
+    
+    subjects = await db.subjects.find(query).to_list(1000)
+    return [Subject(**subject) for subject in subjects]
+
+@api_router.post("/subjects", response_model=Subject)
+async def create_subject(subject_data: Subject, current_user: Dict = Depends(get_admin_user)):
+    """Create a new subject (admin only)"""
+    # Check for duplicate code within the same course
+    existing_subject = await db.subjects.find_one({
+        "course_id": subject_data.course_id,
+        "code": subject_data.code
+    })
+    if existing_subject:
+        raise HTTPException(status_code=400, detail="Subject code already exists in this course")
+    
+    # Verify course exists
+    course = await db.courses.find_one({"id": subject_data.course_id})
+    if not course:
+        raise HTTPException(status_code=400, detail="Course not found")
+    
+    # Verify teacher exists and has TEACHER role
+    teacher = await db.users.find_one({
+        "id": subject_data.teacher_id,
+        "role": {"$in": [UserRole.TEACHER, UserRole.SUPER_ADMIN]}
+    })
+    if not teacher:
+        raise HTTPException(status_code=400, detail="Teacher not found or invalid role")
+    
+    await db.subjects.insert_one(subject_data.dict())
+    return subject_data
+
+@api_router.get("/subjects/{subject_id}", response_model=Subject)
+async def get_subject(subject_id: str, current_user: Dict = Depends(get_current_user)):
+    """Get subject by ID"""
+    subject = await db.subjects.find_one({"id": subject_id})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    return Subject(**subject)
+
+# CO Management Routes
+@api_router.get("/subjects/{subject_id}/cos", response_model=List[CO])
+async def list_subject_cos(subject_id: str, current_user: Dict = Depends(get_current_user)):
+    """List all COs for a subject"""
+    # Verify subject exists and user has access
+    subject = await db.subjects.find_one({"id": subject_id})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    # Check if user is admin, teacher of this subject, or student enrolled
+    if (current_user["role"] not in [UserRole.SUPER_ADMIN, UserRole.TEACHER] and 
+        subject["teacher_id"] != current_user["id"]):
+        # For students, we might want to check enrollment later
+        pass
+    
+    cos = await db.cos.find({"subject_id": subject_id}).to_list(1000)
+    return [CO(**co) for co in cos]
+
+@api_router.post("/subjects/{subject_id}/cos", response_model=CO)
+async def create_co(subject_id: str, co_data: CO, current_user: Dict = Depends(get_teacher_user)):
+    """Create a new CO for a subject (teacher/admin only)"""
+    # Verify subject exists
+    subject = await db.subjects.find_one({"id": subject_id})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    # Check if user is admin or teacher of this subject
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied. You can only manage COs for your own subjects")
+    
+    # Check for duplicate CO code within the same subject
+    existing_co = await db.cos.find_one({
+        "subject_id": subject_id,
+        "code": co_data.code
+    })
+    if existing_co:
+        raise HTTPException(status_code=400, detail="CO code already exists in this subject")
+    
+    # Set the subject_id
+    co_data.subject_id = subject_id
+    await db.cos.insert_one(co_data.dict())
+    return co_data
+
+@api_router.put("/cos/{co_id}", response_model=CO)
+async def update_co(co_id: str, co_data: CO, current_user: Dict = Depends(get_teacher_user)):
+    """Update a CO (teacher/admin only)"""
+    # Verify CO exists
+    existing_co = await db.cos.find_one({"id": co_id})
+    if not existing_co:
+        raise HTTPException(status_code=404, detail="CO not found")
+    
+    # Verify subject exists and user has access
+    subject = await db.subjects.find_one({"id": existing_co["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check for duplicate CO code if code is being changed
+    if co_data.code != existing_co["code"]:
+        duplicate_co = await db.cos.find_one({
+            "subject_id": existing_co["subject_id"],
+            "code": co_data.code,
+            "id": {"$ne": co_id}
+        })
+        if duplicate_co:
+            raise HTTPException(status_code=400, detail="CO code already exists in this subject")
+    
+    # Update CO
+    co_data.subject_id = existing_co["subject_id"]
+    co_data.id = co_id
+    co_data.updated_at = datetime.now(timezone.utc)
+    
+    await db.cos.replace_one({"id": co_id}, co_data.dict())
+    return co_data
+
+@api_router.delete("/cos/{co_id}")
+async def delete_co(co_id: str, current_user: Dict = Depends(get_teacher_user)):
+    """Delete a CO (teacher/admin only)"""
+    # Verify CO exists
+    existing_co = await db.cos.find_one({"id": co_id})
+    if not existing_co:
+        raise HTTPException(status_code=404, detail="CO not found")
+    
+    # Verify subject exists and user has access
+    subject = await db.subjects.find_one({"id": existing_co["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if CO is being used in questions or mappings
+    questions_count = await db.questions.count_documents({"co_id": co_id})
+    mappings_count = await db.co_po_mappings.count_documents({"co_id": co_id})
+    
+    if questions_count > 0 or mappings_count > 0:
+        raise HTTPException(status_code=400, detail="Cannot delete CO. It is being used in questions or PO mappings")
+    
+    await db.cos.delete_one({"id": co_id})
+    return {"message": "CO deleted successfully"}
+
+# PO Management Routes
+@api_router.get("/programs/{program_id}/pos", response_model=List[PO])
+async def list_program_pos(program_id: str, current_user: Dict = Depends(get_current_user)):
+    """List all POs for a program"""
+    # Verify program exists
+    program = await db.programs.find_one({"id": program_id})
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+    
+    pos = await db.pos.find({"program_id": program_id}).to_list(1000)
+    return [PO(**po) for po in pos]
+
+@api_router.post("/programs/{program_id}/pos", response_model=PO)
+async def create_po(program_id: str, po_data: PO, current_user: Dict = Depends(get_admin_user)):
+    """Create a new PO for a program (admin only)"""
+    # Verify program exists
+    program = await db.programs.find_one({"id": program_id})
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+    
+    # Check for duplicate PO code within the same program
+    existing_po = await db.pos.find_one({
+        "program_id": program_id,
+        "code": po_data.code
+    })
+    if existing_po:
+        raise HTTPException(status_code=400, detail="PO code already exists in this program")
+    
+    # Set the program_id
+    po_data.program_id = program_id
+    await db.pos.insert_one(po_data.dict())
+    return po_data
+
+# CO-PO Mapping Routes
+@api_router.get("/cos/{co_id}/po-mappings", response_model=List[COPOMapping])
+async def list_co_po_mappings(co_id: str, current_user: Dict = Depends(get_current_user)):
+    """List all PO mappings for a CO"""
+    # Verify CO exists
+    co = await db.cos.find_one({"id": co_id})
+    if not co:
+        raise HTTPException(status_code=404, detail="CO not found")
+    
+    mappings = await db.co_po_mappings.find({"co_id": co_id}).to_list(1000)
+    return [COPOMapping(**mapping) for mapping in mappings]
+
+@api_router.post("/cos/{co_id}/po-mappings", response_model=COPOMapping)
+async def create_co_po_mapping(co_id: str, mapping_data: COPOMapping, current_user: Dict = Depends(get_teacher_user)):
+    """Create CO-PO mapping (teacher/admin only)"""
+    # Verify CO exists and user has access
+    co = await db.cos.find_one({"id": co_id})
+    if not co:
+        raise HTTPException(status_code=404, detail="CO not found")
+    
+    # Verify subject and user access
+    subject = await db.subjects.find_one({"id": co["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Verify PO exists
+    po = await db.pos.find_one({"id": mapping_data.po_id})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    
+    # Check for duplicate mapping
+    existing_mapping = await db.co_po_mappings.find_one({
+        "co_id": co_id,
+        "po_id": mapping_data.po_id
+    })
+    if existing_mapping:
+        raise HTTPException(status_code=400, detail="CO-PO mapping already exists")
+    
+    # Set the co_id
+    mapping_data.co_id = co_id
+    await db.co_po_mappings.insert_one(mapping_data.dict())
+    return mapping_data
+
+@api_router.put("/co-po-mappings/{mapping_id}", response_model=COPOMapping)
+async def update_co_po_mapping(mapping_id: str, mapping_data: COPOMapping, current_user: Dict = Depends(get_teacher_user)):
+    """Update CO-PO mapping weight (teacher/admin only)"""
+    # Verify mapping exists
+    existing_mapping = await db.co_po_mappings.find_one({"id": mapping_id})
+    if not existing_mapping:
+        raise HTTPException(status_code=404, detail="CO-PO mapping not found")
+    
+    # Verify CO and subject access
+    co = await db.cos.find_one({"id": existing_mapping["co_id"]})
+    if not co:
+        raise HTTPException(status_code=404, detail="CO not found")
+    
+    subject = await db.subjects.find_one({"id": co["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Update only the weight
+    await db.co_po_mappings.update_one(
+        {"id": mapping_id},
+        {"$set": {"weight": mapping_data.weight}}
+    )
+    
+    updated_mapping = await db.co_po_mappings.find_one({"id": mapping_id})
+    return COPOMapping(**updated_mapping)
+
+@api_router.delete("/co-po-mappings/{mapping_id}")
+async def delete_co_po_mapping(mapping_id: str, current_user: Dict = Depends(get_teacher_user)):
+    """Delete CO-PO mapping (teacher/admin only)"""
+    # Verify mapping exists
+    existing_mapping = await db.co_po_mappings.find_one({"id": mapping_id})
+    if not existing_mapping:
+        raise HTTPException(status_code=404, detail="CO-PO mapping not found")
+    
+    # Verify CO and subject access
+    co = await db.cos.find_one({"id": existing_mapping["co_id"]})
+    if not co:
+        raise HTTPException(status_code=404, detail="CO not found")
+    
+    subject = await db.subjects.find_one({"id": co["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    await db.co_po_mappings.delete_one({"id": mapping_id})
+    return {"message": "CO-PO mapping deleted successfully"}
+
+# Question Bank Routes
+@api_router.get("/subjects/{subject_id}/questions", response_model=List[Question])
+async def list_subject_questions(
+    subject_id: str, 
+    type: Optional[QuestionType] = None,
+    difficulty: Optional[Difficulty] = None,
+    co_id: Optional[str] = None,
+    tags: Optional[str] = None,
+    current_user: Dict = Depends(get_teacher_user)
+):
+    """List questions for a subject with optional filters"""
+    # Verify subject exists and user has access
+    subject = await db.subjects.find_one({"id": subject_id})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Build query
+    query = {"subject_id": subject_id}
+    if type:
+        query["type"] = type
+    if difficulty:
+        query["difficulty"] = difficulty
+    if co_id:
+        query["co_id"] = co_id
+    if tags:
+        tag_list = [tag.strip() for tag in tags.split(",")]
+        query["tags"] = {"$in": tag_list}
+    
+    questions = await db.questions.find(query).to_list(1000)
+    return [Question(**question) for question in questions]
+
+@api_router.post("/subjects/{subject_id}/questions", response_model=Question)
+async def create_question(subject_id: str, question_data: Question, current_user: Dict = Depends(get_teacher_user)):
+    """Create a new question (teacher/admin only)"""
+    # Verify subject exists and user has access
+    subject = await db.subjects.find_one({"id": subject_id})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Verify CO exists and belongs to this subject
+    co = await db.cos.find_one({"id": question_data.co_id, "subject_id": subject_id})
+    if not co:
+        raise HTTPException(status_code=400, detail="CO not found in this subject")
+    
+    # Validate question type-specific requirements
+    if question_data.type in [QuestionType.MCQ, QuestionType.MSQ, QuestionType.TRUE_FALSE]:
+        if not question_data.options or not question_data.correct_key:
+            raise HTTPException(status_code=400, detail="Options and correct key are required for MCQ/MSQ/True-False questions")
+    
+    if question_data.type == QuestionType.NUMERIC:
+        if question_data.correct_key is None:
+            raise HTTPException(status_code=400, detail="Correct answer is required for numeric questions")
+    
+    # Set the subject_id
+    question_data.subject_id = subject_id
+    await db.questions.insert_one(question_data.dict())
+    return question_data
+
+@api_router.get("/questions/{question_id}", response_model=Question)
+async def get_question(question_id: str, current_user: Dict = Depends(get_teacher_user)):
+    """Get question by ID"""
+    question = await db.questions.find_one({"id": question_id})
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    
+    # Verify user has access to this question's subject
+    subject = await db.subjects.find_one({"id": question["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return Question(**question)
+
+@api_router.put("/questions/{question_id}", response_model=Question)
+async def update_question(question_id: str, question_data: Question, current_user: Dict = Depends(get_teacher_user)):
+    """Update a question (teacher/admin only)"""
+    # Verify question exists
+    existing_question = await db.questions.find_one({"id": question_id})
+    if not existing_question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    
+    # Verify subject and user access
+    subject = await db.subjects.find_one({"id": existing_question["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Verify CO exists and belongs to this subject
+    co = await db.cos.find_one({"id": question_data.co_id, "subject_id": existing_question["subject_id"]})
+    if not co:
+        raise HTTPException(status_code=400, detail="CO not found in this subject")
+    
+    # Update question
+    question_data.id = question_id
+    question_data.subject_id = existing_question["subject_id"]
+    question_data.updated_at = datetime.now(timezone.utc)
+    question_data.version = existing_question.get("version", 1) + 1
+    
+    await db.questions.replace_one({"id": question_id}, question_data.dict())
+    return question_data
+
+@api_router.delete("/questions/{question_id}")
+async def delete_question(question_id: str, current_user: Dict = Depends(get_teacher_user)):
+    """Delete a question (teacher/admin only)"""
+    # Verify question exists
+    existing_question = await db.questions.find_one({"id": question_id})
+    if not existing_question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    
+    # Verify subject and user access
+    subject = await db.subjects.find_one({"id": existing_question["subject_id"]})
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    if (current_user["role"] != UserRole.SUPER_ADMIN and 
+        subject["teacher_id"] != current_user["id"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if question is used in any exams
+    exam_questions_count = await db.exam_questions.count_documents({"question_id": question_id})
+    if exam_questions_count > 0:
+        raise HTTPException(status_code=400, detail="Cannot delete question. It is being used in exams")
+    
+    await db.questions.delete_one({"id": question_id})
+    return {"message": "Question deleted successfully"}
+
 # Health check
 @api_router.get("/health")
 async def health_check():
@@ -599,6 +1062,12 @@ async def startup_event():
     await db.subjects.create_index([("course_id", 1), ("code", 1)], unique=True)
     await db.cos.create_index([("subject_id", 1), ("code", 1)], unique=True)
     await db.pos.create_index([("program_id", 1), ("code", 1)], unique=True)
+    await db.co_po_mappings.create_index([("co_id", 1), ("po_id", 1)], unique=True)
+    await db.questions.create_index("subject_id")
+    await db.questions.create_index("type")
+    await db.questions.create_index("difficulty")
+    await db.questions.create_index("co_id")
+    await db.questions.create_index("tags")
     
     logger.info("Database indexes created")
 
