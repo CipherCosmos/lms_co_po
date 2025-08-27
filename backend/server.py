@@ -366,6 +366,14 @@ async def get_setup_status():
     setup = await db.setup.find_one({"id": "setup"})
     if not setup:
         return {"is_setup_complete": False, "setup_step": 0}
+    
+    # Double check if admin user actually exists
+    admin_exists = await db.users.find_one({"role": UserRole.SUPER_ADMIN})
+    if not admin_exists:
+        # Reset setup if no admin found
+        await db.setup.delete_one({"id": "setup"})
+        return {"is_setup_complete": False, "setup_step": 0}
+        
     return {"is_setup_complete": setup.get("is_setup_complete", False), "setup_step": setup.get("setup_step", 0)}
 
 @api_router.post("/setup/initialize")
