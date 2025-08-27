@@ -396,10 +396,11 @@ class LMSBackendTester:
         
         # Test creating a program (need department ID)
         if dept_id:
+            timestamp = int(time.time())
             prog_data = {
                 "dept_id": dept_id,
                 "name": "Bachelor of Technology in Computer Science",
-                "code": "BTECHCSE"
+                "code": f"BTECHCSE{timestamp}"
             }
             
             response = self.make_request('POST', '/programs', prog_data, auth_required=True)
