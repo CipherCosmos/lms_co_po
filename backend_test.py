@@ -213,7 +213,8 @@ class LMSBackendTester:
             self.log_test("Token Refresh", False, "No refresh token available")
             return False
         
-        response = self.make_request('POST', '/auth/refresh', {"refresh_token": self.refresh_token})
+        # The refresh token is expected as a query parameter
+        response = self.make_request('POST', f'/auth/refresh?refresh_token={self.refresh_token}')
         if response is None:
             self.log_test("Token Refresh", False, "Request failed")
             return False
